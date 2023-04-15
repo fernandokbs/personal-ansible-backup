@@ -1,0 +1,55 @@
+# ansible-playbook playbook.yml -e "target=mods"
+# export $(cat /var/www/mods/.env | xargs)
+# ansible_python_interpreter: /usr/bin/python3
+---
+- hosts: "{{target}}"
+  vars:
+      destination_path: '/Users/fernandogpz/'
+
+  tasks:
+    - name: Print host
+      debug:
+        msg: "Connection to: {{ target }}"
+
+    - name: Set database name
+      shell: echo {{ target }}-ansible-$(date +%F).sql
+      args: 
+        executable: /bin/bash
+      register: file_name
+
+    - name: Set database password
+      shell: . /root/.bashrc && echo $DB_PASSWORD
+      args: 
+        executable: /bin/bash
+      register: database_password
+    
+    - name: Set backup name
+      shell: . /root/.bashrc && echo $DB_DATABASE
+      args: 
+        executable: /bin/bash
+      register: database_name
+
+    - name: Download database backup
+      shell: |
+        mysqldump -u root -p"{{ database_password.stdout }}" {{ database_name.stdout }} --quick --lock-tables=false > {{ file_name.stdout }} --no-tablespaces
+
+    - name: Download backup to local computer
+      ansible.builtin.fetch:
+        src: "{{ file_name.stdout }}"
+        dest: "{{ destination_path }}"
+        flat: yes
+
+    - name: Remove local database
+      shell: |
+        mysql -u root -e "DROP DATABASE IF EXISTS {{ target }}; CREATE DATABASE IF NOT EXISTS {{ target }}"
+      delegate_to: 127.0.0.1
+
+    - name: Backup up backup
+      shell: |
+        mysql -u root -e "use {{ target }}; source {{ destination_path }}/{{ file_name.stdout }};"
+      delegate_to: 127.0.0.1
+
+    - name: Update password to testroot
+      shell: |
+        mysql -u root -e "use {{ target }}; UPDATE users set password = '\$2y\$10\$vfk2F.tLGB8IfFpOtSiGIe9iWz7sIvNI9BGguWjYjqR/IkcPBc1NS';"
+      delegate_to: 127.0.0.1
